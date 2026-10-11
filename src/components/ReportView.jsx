@@ -3,6 +3,7 @@ import { PlusCircle, MapPin, UploadCloud, CheckCircle2, AlertTriangle, Camera, S
 import { submitReport } from '../api/apiClient';
 import { clearStoredReports } from '../utils/reportStorage';
 import { searchGeocodeLocation } from '../api/geocodingApi';
+import { getIncidentProvenanceLabel, getProvenanceBadgeClass } from '../utils/provenance';
 
 export default function ReportView({ onReportAdded, navigateTo }) {
   const [title, setTitle] = useState('');
@@ -96,10 +97,15 @@ export default function ReportView({ onReportAdded, navigateTo }) {
     setIsSubmitting(false);
 
     if (result.success) {
-      setSubmittedTicket(result.ticket);
+      setSubmittedTicket({
+        ...result.ticket,
+        persistedToCloud: result.persistedToCloud,
+        cloudFailed: result.cloudFailed,
+        cloudError: result.cloudError
+      });
       if (onReportAdded) onReportAdded();
     } else {
-      setErrorMessage(result.error || 'Failed to persist report to local storage.');
+      setErrorMessage(result.error || 'Failed to persist incident report.');
     }
   };
 
@@ -137,13 +143,30 @@ export default function ReportView({ onReportAdded, navigateTo }) {
           <div className="success-icon-ring">
             <CheckCircle2 size={40} color="var(--color-lime)" />
           </div>
-          <h3 className="success-title">INCIDENT REPORT SAVED</h3>
+          <h3 className="success-title">
+            {submittedTicket.persistedToCloud
+              ? "INCIDENT REPORT SYNCHRONIZED TO AWS"
+              : submittedTicket.cloudFailed
+                ? "REPORT SAVED LOCALLY (CLOUD SYNC FAILED)"
+                : "INCIDENT REPORT SAVED LOCALLY"}
+          </h3>
           <p className="success-desc mono">
-            Ticket ID <strong>{submittedTicket.id}</strong> has been saved to your browser storage.
+            {submittedTicket.persistedToCloud ? (
+              <>Ticket ID <strong>{submittedTicket.id}</strong> has been saved and synchronized to AWS DynamoDB.</>
+            ) : submittedTicket.cloudFailed ? (
+              <>Ticket ID <strong>{submittedTicket.id}</strong> saved to browser storage. <span style={{ color: 'var(--color-amber)', display: 'block', marginTop: '4px' }}>Notice: {submittedTicket.cloudError}</span></>
+            ) : (
+              <>Ticket ID <strong>{submittedTicket.id}</strong> has been saved to your browser storage.</>
+            )}
           </p>
 
           <div className="ticket-summary-box mono">
-            <div><strong>Data Mode:</strong> <span className="badge badge-orange">{submittedTicket.dataMode}</span></div>
+            <div>
+              <strong>Data Mode:</strong>{' '}
+              <span className={`badge ${getProvenanceBadgeClass(getIncidentProvenanceLabel(submittedTicket))}`}>
+                {getIncidentProvenanceLabel(submittedTicket)}
+              </span>
+            </div>
             <div><strong>Ticket ID:</strong> {submittedTicket.id}</div>
             <div><strong>Title:</strong> {submittedTicket.title}</div>
             <div><strong>Location:</strong> {submittedTicket.location}</div>
@@ -299,7 +322,7 @@ export default function ReportView({ onReportAdded, navigateTo }) {
                 className="submit-report-btn"
               >
                 <PlusCircle size={16} />
-                <span className="mono">{isSubmitting ? "SAVING TO LOCAL STORAGE..." : "SUBMIT INCIDENT REPORT"}</span>
+                <span className="mono">{isSubmitting ? "TRANSMITTING INCIDENT REPORT..." : "SUBMIT INCIDENT REPORT"}</span>
               </button>
             </div>
           </form>

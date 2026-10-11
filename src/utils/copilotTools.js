@@ -1,30 +1,35 @@
-import { INITIAL_SENSORS, INITIAL_INCIDENTS } from '../data/mockData';
-import { calculateLocationRisk, interpretCitizenReportText } from './riskEngine';
+import { TARGET_LOCATIONS } from '../data/mockData.js';
+import { getStoredReports } from './reportStorage.js';
+import { calculateLocationRisk, interpretCitizenReportText } from './riskEngine.js';
+import { isActiveIncident } from './incidentStatus.js';
 
 /**
  * FloodShield Copilot Executable Tool Suite
+ * Provides local evidence gathering & deterministic triage analysis
  */
 
 export const COPILOT_TOOLS = {
   // Tool 1: Assess Flood Risk
-  assess_flood_risk: (locationId) => {
-    const sensor = INITIAL_SENSORS.find(s => s.id === locationId) || INITIAL_SENSORS[0];
+  assess_flood_risk: (locationId = 'LOC-1') => {
+    const loc = TARGET_LOCATIONS.find(l => l.id === locationId) || TARGET_LOCATIONS[0];
+    const userReports = getStoredReports();
+    const activeReports = userReports.filter(isActiveIncident);
     const risk = calculateLocationRisk({
-      rainfallRate: sensor.rainfallRate,
-      elevationM: sensor.id === 'SN-4029' ? 4 : 8,
-      drainEfficiency: sensor.id === 'SN-8192' ? 35 : 65,
-      incidentCount: 2,
-      maxIncidentSeverity: sensor.riskLevel,
-      isSimulated: !sensor.isGenuineData
+      rainfallRate: 45,
+      elevationM: loc.elevationM || 6,
+      drainEfficiency: 55,
+      incidentCount: activeReports.length,
+      maxIncidentSeverity: activeReports[0]?.severity || 'MEDIUM',
+      isSimulated: false
     });
 
     return {
       tool: 'assess_flood_risk',
       arguments: { locationId },
       result: {
-        location: sensor.name,
-        sensorId: sensor.id,
-        currentDepthCm: sensor.depthCm,
+        location: loc.name,
+        locationId: loc.id,
+        elevationM: loc.elevationM,
         riskScore: risk.riskScore,
         riskLevel: risk.riskLevel,
         contributingFactors: risk.contributingFactors,
@@ -36,19 +41,20 @@ export const COPILOT_TOOLS = {
 
   // Tool 2: Get Recent Reports
   get_recent_reports: (locationId) => {
-    const reports = INITIAL_INCIDENTS.map(inc => ({
+    const userReports = getStoredReports();
+    const reports = userReports.map(inc => ({
       id: inc.id,
       title: inc.title,
       location: inc.location,
       severity: inc.severity,
       waterDepthCm: inc.waterDepthCm,
       status: inc.status,
-      aiTrustScore: inc.aiTrustScore
+      timestamp: inc.timestamp
     }));
 
     return {
       tool: 'get_recent_reports',
-      arguments: { locationId: locationId || 'ALL_WARDS' },
+      arguments: { locationId: locationId || 'ALL_LOCATIONS' },
       result: {
         totalReports: reports.length,
         reports
@@ -61,15 +67,15 @@ export const COPILOT_TOOLS = {
     const facilities = [
       { name: "Riverside General Hospital Emergency Ward", distance: "400m", status: "ACCESS CLEAR VIA FLYOVER", criticalLevel: "HIGH" },
       { name: "City Central Metro Transit Gate 3", distance: "120m", status: "WATERLOGGED (55cm)", criticalLevel: "CRITICAL" },
-      { name: "Sector 4 Primary School", distance: "850m", status: "SHELTER READY", criticalLevel: "MEDIUM" },
-      { name: "Electrical Transformer Substation #9", distance: "300m", status: "PUMP DEPLOYED", criticalLevel: "CRITICAL" }
+      { name: "Sector 4 Primary School (Relief Camp)", distance: "850m", status: "SHELTER READY", criticalLevel: "MEDIUM" },
+      { name: "Electrical Transformer Substation #9", distance: "300m", status: "DEWATERING PUMP DEPLOYED", criticalLevel: "CRITICAL" }
     ];
 
     return {
       tool: 'find_affected_facilities',
-      arguments: { locationId: locationId || 'SN-4029' },
+      arguments: { locationId: locationId || 'LOC-1' },
       result: {
-        location: locationId || 'SN-4029',
+        location: locationId || 'LOC-1',
         facilitiesCount: facilities.length,
         facilities
       }
@@ -80,14 +86,14 @@ export const COPILOT_TOOLS = {
   check_road_accessibility: (areaId) => {
     return {
       tool: 'check_road_accessibility',
-      arguments: { areaId: areaId || 'Sector 4 Metro Corridor' },
+      arguments: { areaId: areaId || 'Coastal & Transit Corridors' },
       result: {
-        area: areaId || 'Sector 4 Metro Corridor',
-        overallAccessibility: 'RESTRICTED',
+        area: areaId || 'Coastal & Transit Corridors',
+        overallAccessibility: 'CAUTION ADVISED',
         affectedRoads: [
-          { segment: 'Metro Underpass L4', status: 'IMPASSABLE (55cm water)', vehicleRestriction: 'No Light Sedans' },
-          { segment: 'Harbor Flyover Ramp', status: 'PASSABLE WITH CAUTION (18cm water)', vehicleRestriction: 'Open' },
-          { segment: 'Elevated Ridge Link', status: '100% CLEAR', vehicleRestriction: 'Open All Vehicles' }
+          { segment: 'Low-Lying Underpass Link', status: 'IMPASSABLE (>50cm standing water)', vehicleRestriction: 'No Light Sedans' },
+          { segment: 'Elevated Coastal Flyover Ramp', status: 'PASSABLE WITH CAUTION', vehicleRestriction: 'Open' },
+          { segment: 'Arterial Ridge Highway', status: '100% CLEAR & ELEVATED', vehicleRestriction: 'Open All Vehicles' }
         ]
       }
     };
@@ -97,17 +103,17 @@ export const COPILOT_TOOLS = {
   generate_recommended_actions: (evidence) => {
     return {
       tool: 'generate_recommended_actions',
-      arguments: { evidence: evidence || 'High Waterlogging & Drain Clog' },
+      arguments: { evidence: evidence || 'Monsoon Waterlogging & Arterial Inundation' },
       result: {
         citizenPrecautions: [
-          'Avoid Metro Underpass L4; use Elevated Ridge Link detour.',
-          'Do not drive light sedans through standing water exceeding 25cm.',
-          'Stay updated via FloodShield SMS alert feed.'
+          'Avoid low-lying underpasses and pedestrian subways; prioritize elevated bypass routes.',
+          'Do not drive standard vehicles through standing water exceeding 20cm.',
+          'Secure ground-level electrical appliances if localized waterlogging rises above curb level.'
         ],
         responderPriorities: [
-          'Deploy Mobile Pump Unit #3 to Metro Basin Gate 3.',
-          'Position traffic diversion barriers at Eastbound Flyover exit.',
-          'Verify citizen report INC-9041 basement pump status.'
+          'Deploy high-capacity mobile dewatering pump units to critical low-lying basins.',
+          'Position traffic diversion barriers at arterial underpass entrances.',
+          'Verify and triage citizen incident reports in the Incident Radar queue.'
         ]
       }
     };

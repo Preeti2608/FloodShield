@@ -10,6 +10,7 @@ import ReportView from './components/ReportView';
 import Footer from './components/Footer';
 import WaterBackgroundCanvas from './components/WaterBackgroundCanvas';
 
+import { getReports } from './api/apiClient';
 import { getStoredReports } from './utils/reportStorage';
 
 export default function App() {
@@ -19,7 +20,9 @@ export default function App() {
   const [weatherOk, setWeatherOk] = useState(true);
 
   const refreshReports = () => {
-    setUserReports(getStoredReports());
+    getReports().then(res => {
+      setUserReports(res.reports || []);
+    });
   };
 
   useEffect(() => {

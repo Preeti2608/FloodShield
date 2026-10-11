@@ -1,325 +1,271 @@
-# FLOODSHIELD — Environmental Intelligence & Early-Warning Platform
+# FloodShield — Hyperlocal Environmental Intelligence & Flood-Aware Navigation
 
-FloodShield is an AI-powered hyperlocal flood and waterlogging early-warning web application designed for environmental intelligence, citizen safety reporting, and disaster mitigation during extreme weather events.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Framework: React 19 + Vite](https://img.shields.io/badge/Framework-React%2019%20%2B%20Vite-646CFF.svg)](https://vitejs.dev/)
+[![Cloud: AWS Serverless](https://img.shields.io/badge/Backend-AWS%20API%20Gateway%20%2B%20Lambda%20%2B%20DynamoDB-FF9900.svg)](https://aws.amazon.com/)
+[![Deployment: Vercel Ready](https://img.shields.io/badge/Deploy-Vercel-black.svg)](https://vercel.com/)
 
----
-
-## A. PROJECT OVERVIEW
-
-Urban coastal centers and low-lying cities face severe waterlogging, sudden street flooding, and delayed emergency information during heavy monsoon downpours. FloodShield bridges this critical gap by unifying live atmospheric weather observations, citizen-reported flood incidents, interactive topographic mapping, and intelligent response assistance into a single unified interface.
-
-### Current Working Capabilities
-- **Hyperlocal Atmospheric Monitoring**: Live weather observations (precipitation rates in mm/hr, temperature, wind speed, atmospheric pressure) fetched dynamically via the Open-Meteo public API.
-- **Interactive Topographic Atlas**: Leaflet + OpenStreetMap interactive mapping centered on low-lying urban areas (e.g., Mumbai), featuring Nominatim geocoding location search, radius filtering (5 km, 10 km, 25 km, ALL), and national map fitting.
-- **Citizen Incident Reporting & Persistence**: Fully functional report submission flow with strict coordinate integrity (GPS auto-detection, Nominatim geocoding, or explicit `null` setting for unlocated reports). Reports persist reliably across browser sessions in `localStorage` under key `floodshield_user_reports_v1`.
-- **Coordinate Integrity & Marker Exclusion**: Reports with valid numeric coordinates render as interactive Leaflet map pins; unlocated reports appear in the telemetry panel list but are excluded from geographic map pins and Haversine radius filters.
-- **Scenario Simulation Laboratory**: Interactive elevation, rainfall rate, and drain efficiency simulation lab for modeling urban surface water accumulation.
-- **Emergency Safe Passage Checklist**: Routing hazard checklist with elevation indicators and strict safety disclaimers.
-
-### Technology Stack
-- **Frontend Core**: React 19, Vite 8, JavaScript (ES modules)
-- **Map & Geospatial**: Leaflet 1.9, React-Leaflet 5, OpenStreetMap Tiles, Nominatim Geocoding API
-- **Live Weather Data**: Open-Meteo Atmospheric Forecast API
-- **Icons & UI**: Lucide-React icons, custom CSS Design System (Obsidian `#090A0A` theme with Signal Orange `#FF6438` and Acid Lime `#C7F36B` accents)
-- **Local Persistence**: Browser `localStorage` API
-- **Containerization**: Multi-stage Docker build with Nginx Alpine
+FloodShield is an AI-enhanced, environmental intelligence and hyperlocal flood-aware routing web platform designed for urban centers subject to extreme monsoon rainfall, flash floods, and coastal inundation.
 
 ---
 
-## B. FEATURE STATUS
+## 1. Problem Statement & Purpose
 
-| Feature Module | Current Implementation Status | Real Data / Backend Status |
+Dense coastal metropolises (e.g., Mumbai, Chennai, Jakarta) experience acute localized waterlogging during torrential monsoon downpours. Conventional mapping platforms route vehicles into submerged underpasses and inundated arterials because municipal flood gauges are disconnected from public consumer maps.
+
+FloodShield bridges this operational gap by synthesizing:
+1. **Live Atmospheric Feeds**: Real-time precipitation rates and atmospheric telemetry from Open-Meteo.
+2. **Official Government Feeds**: Disaster advisories parsed from the Indian National Disaster Management Authority (NDMA SACHET) Common Alerting Protocol (CAP) feed.
+3. **Citizen Field Telemetry**: Crowdsourced flood reports persisted to Amazon DynamoDB with verified geographic coordinates, water depth, and triage status.
+4. **Hazard-Aware Route Engine**: Dual-corridor evaluation that detects flood hazards along travel paths, preferring elevated terrain detours over low-lying underpasses.
+5. **Scenario Lab**: Deterministic runoff accumulation modeling to simulate urban waterlogging under varying rainfall and tidal surge scenarios.
+
+---
+
+## 2. Core Capabilities & Feature Modules
+
+| Module | Route | Capabilities & Real Data Feeds |
 | :--- | :--- | :--- |
-| **Flood Atlas (`/atlas`)** | **Implemented**: Leaflet map, radius filtering, search, map markers, location recentering | Live Open-Meteo weather feed; local user reports rendered from `localStorage` |
-| **Incidents Telemetry (`/incidents`)** | **Implemented**: Scrollable report feed, category filtering, clear local reports procedure | Displays locally saved citizen reports; server aggregation pending AWS backend |
-| **Response Copilot (`/copilot`)** | **Implemented**: Tactical advice UI, quick prompt shortcuts, client-side fallback responses | Full LLM inference pending AWS Bedrock & API Gateway deployment (`POST /assess`) |
-| **Scenario Lab (`/scenario-lab`)** | **Implemented**: Interactive risk slider matrix and runoff accumulation engine | Outputs are explicitly labeled as mathematical simulations, not live measurements |
-| **Safe Passage (`/safe-passage`)** | **Implemented**: Route selection UI, elevation checklist, safety warnings | Displayed routes include strict disclaimers ("ROUTE SAFETY UNVERIFIED BY MUNICIPAL TELEMETRY") |
-| **Report Incident (`/report`)** | **Implemented**: GPS auto-detect, Nominatim geocoding, localStorage persistence | Reports are saved locally to the browser profile (`floodshield_user_reports_v1`) |
-
-> [!IMPORTANT]
-> **Data Integrity Notice**: Browser `localStorage` reports are local to your current browser profile and device. Multi-user report synchronization, official municipal stream gauge telemetry, and automated flood verification require the planned AWS backend.
+| **Flood Atlas** | `/atlas` | Interactive Leaflet/OSM map, Nominatim geocoding search, radius filtering (5 km, 10 km, 25 km, ALL), live Open-Meteo weather telemetry, and real-time hazard pin rendering with provenance markers. |
+| **Safe Passage** | `/safe-passage` | Dynamic hazard-aware route assessment with dual-layer high-contrast polylines, 1.5 km corridor hazard scanning, clickable routes, side-panel hazard inspector, and transparent elevation terrain assumptions. |
+| **Incidents Radar** | `/incidents` | Multi-category incident feed (Waterlogging, Road Blocked, Submerged Vehicle, Severe Drainage Failure), active triage dispatch actions, and provenance tracking (`AWS-SYNCED` vs `LOCAL-ONLY`). |
+| **Report Portal** | `/report` | Citizen incident reporting with HTML5 GPS auto-detection, Nominatim reverse geocoding, water depth slider (cm), and two-tier persistence (AWS DynamoDB sync + local browser backup). |
+| **Scenario Lab** | `/scenario-lab` | Hydrodynamic runoff simulation matrix modeling rainfall rate (mm/hr), storm surge (m), and drain efficiency (%) into peak water depth and time-to-inundation estimates. |
+| **Response Copilot** | `/copilot` | Tactical emergency guidance assistant backed by AWS Lambda / Bedrock (`POST /assess`) with deterministic client-side decision support fallback. |
 
 ---
 
-## C. ARCHITECTURE
+## 3. Technology Stack
+
+### Frontend Architecture
+- **Framework**: React 19, Vite 8, JavaScript (ES modules)
+- **Mapping & Geospatial**: Leaflet 1.9, React-Leaflet 5, OpenStreetMap Tiles, Nominatim API
+- **External Public Feeds**: Open-Meteo Forecast API (Rainfall, Wind, Pressure), NDMA SACHET CAP Feed
+- **Design System**: Graphite/Obsidian (`#090A0A`) dark UI with Signal Orange (`#FF6438`) and Cyan (`#00E5FF`) accents, Lucide-React icons
+- **State & Storage**: Client-side storage (`localStorage` fallback) with resilient cloud synchronizer
+- **Hosting Target**: Vercel (Single Page Application with `vercel.json` rewrites)
+
+### Backend Architecture (AWS Serverless)
+- **API Gateway**: Amazon API Gateway v2 (HTTP API, low-latency, built-in CORS)
+- **Compute**: AWS Lambda (Node.js 20.x ES Modules, 256MB memory, 15s timeout)
+- **Database**: Amazon DynamoDB (`PAY_PER_REQUEST` On-Demand billing, 0 idle cost)
+- **AI / Decision Support**: Amazon Bedrock (Claude 3 Haiku, optional) with deterministic fallback
+- **Logging**: Amazon CloudWatch Logs with strict 7-day retention policy
+
+---
+
+## 4. System Architecture & Request Flow
 
 ```mermaid
 flowchart TD
-    subgraph Client ["Client Browser (React 19 + Vite SPA)"]
-        UI["FloodShield React UI"]
-        STORAGE["Browser localStorage ('floodshield_user_reports_v1')"]
-        ENGINE["Client-Side Risk Engine (Haversine & Elevation)"]
+    subgraph Browser ["Client Browser (React 19 SPA on Vercel)"]
+        UI["FloodShield UI"]
+        ROUTER["SPA Router (/atlas, /safe-passage, /incidents)"]
+        CLIENT["apiClient.js (Resilient Hybrid Client)"]
+        LOCAL_STORAGE[("localStorage ('floodshield_user_reports_v1')")]
+        ROUTE_ENGINE["Route Corridor Assessment Engine"]
     end
 
-    subgraph ExternalFeeds ["External Public Data Providers"]
-        METEO["Open-Meteo Weather API (Live Precipitation & Wind)"]
-        NOMINATIM["OpenStreetMap Nominatim API (Geocoding Search)"]
-        OSM["OpenStreetMap Tile Server"]
+    subgraph ExternalFeeds ["Public External Feeds (Direct HTTPS)"]
+        METEO["Open-Meteo API (Precipitation & Wind)"]
+        OSM["OpenStreetMap Tiles & Nominatim Search"]
+        SACHET["NDMA SACHET CAP Feed (Official Warnings)"]
     end
 
-    subgraph AWSBackend ["PLANNED AWS Backend (Pending Deployment)"]
-        APIGW["Amazon API Gateway HTTP API"]
-        LAMBDA["AWS Lambda (Report Handler & Assessment Engine)"]
-        DDB[("Amazon DynamoDB (Multi-User Incident Storage)")]
-        BEDROCK["Amazon Bedrock (AI Emergency Guidance)"]
+    subgraph AWSBackend ["AWS Serverless Cloud Backend (ap-south-1)"]
+        APIGW["API Gateway HTTP API v2 (CORS: *)"]
+        LAMBDA["AWS Lambda: FloodShieldBackend"]
+        DDB[("Amazon DynamoDB: FloodShield-Incidents")]
+        BEDROCK["Amazon Bedrock (Claude 3 Haiku - Optional)"]
     end
 
-    UI <--> STORAGE
-    UI --> ENGINE
-    UI <--> METEO
-    UI <--> NOMINATIM
-    UI <--> OSM
+    UI --> ROUTER
+    UI --> CLIENT
+    CLIENT <--> LOCAL_STORAGE
+    CLIENT --> ROUTE_ENGINE
 
-    UI -. "VITE_API_BASE_URL (Planned HTTP API)" .-> APIGW
-    APIGW -.-> LAMBDA
-    LAMBDA -.-> DDB
-    LAMBDA -.-> BEDROCK
+    CLIENT -->|HTTPS GET| METEO
+    CLIENT -->|HTTPS GET| OSM
+    CLIENT -->|HTTPS GET| SACHET
+
+    CLIENT -->|HTTPS REST via VITE_API_BASE_URL| APIGW
+    APIGW -->|Proxy Integration| LAMBDA
+    LAMBDA <-->|Read / Write Incidents| DDB
+    LAMBDA -.->|Optional AI Inference| BEDROCK
 ```
 
+### Hybrid Resilience Model
+- **Cloud-Connected**: When `VITE_API_BASE_URL` is set and `VITE_USE_MOCK_DATA=false`, reports and status updates synchronize with Amazon DynamoDB via AWS API Gateway.
+- **Graceful Fallback**: If network connectivity drops or the AWS endpoint is unavailable, `apiClient.js` falls back seamlessly to browser `localStorage` and client-side deterministic models. Incidents are transparently labeled `LOCAL-ONLY INCIDENT` or `AWS-SYNCED INCIDENT`.
+
 ---
 
-## D. TECHNOLOGY TABLE
+## 5. Environment Variables & Configuration
 
-| Technology | Category | Role in FloodShield |
+FloodShield enforces strict separation between public browser variables and backend-only credentials:
+
+### Frontend Environment Variables (Vite / Vercel)
+All variables prefixed with `VITE_*` are bundled into client-side JavaScript. **Never put AWS credentials in these variables!**
+
+| Variable | Scope | Required? | Default / Example | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| `VITE_API_BASE_URL` | Public (Client Bundle) | Optional | `https://abcdef1234.execute-api.ap-south-1.amazonaws.com` | Base URL of deployed AWS API Gateway HTTP API. If empty, runs in standalone local mode. |
+| `VITE_USE_MOCK_DATA` | Public (Client Bundle) | Optional | `false` (Production) / `true` (Demo) | Toggles between live cloud API calls and local offline mock data. |
+| `VITE_APP_ENV` | Public (Client Bundle) | Optional | `production` | Environment indicator label (`production`, `staging`, `development`). |
+
+### Backend Environment Variables (`backend/.env` — Backend / Lambda Only)
+These variables are used by AWS Lambda and administrative scripts. **They must never be committed to Git or exposed in client bundles.**
+
+| Variable | Scope | Description |
 | :--- | :--- | :--- |
-| **React 19** | UI Library | Core component-driven web user interface |
-| **Vite 8** | Build Tool & Dev Server | Fast HMR development server and ESBuild static bundler |
-| **Leaflet / React-Leaflet** | Geospatial / Mapping | Interactive map display, tile rendering, custom markers |
-| **Open-Meteo API** | External Weather Feed | Live real-time atmospheric precipitation and weather data |
-| **Nominatim API** | External Geocoding | Converts user location queries into numeric coordinates |
-| **Lucide React** | Iconography | Lightweight vector icons for operational UI |
-| **Nginx Alpine** | Production Web Server | Static production asset hosting & SPA history routing fallback |
-| **Docker** | Containerization | Multi-stage image build for portable cloud deployment |
+| `AWS_REGION` | Lambda Runtime | Target AWS region (default: `ap-south-1`). |
+| `TABLE_NAME` | Lambda Runtime | DynamoDB table name (default: `FloodShield-Incidents`). |
+| `ENABLE_BEDROCK` | Lambda Runtime | `true` or `false` to enable Amazon Bedrock AI inference. |
+| `BEDROCK_MODEL_ID` | Lambda Runtime | Foundation model ID (e.g. `anthropic.claude-3-haiku-20240307-v1:0`). |
+| `AWS_ACCESS_KEY_ID` | Local CLI Tools Only | For `deploy.mjs` / `check-permissions.mjs` execution from local workstation. In Lambda, IAM role policies grant access automatically. |
+| `AWS_SECRET_ACCESS_KEY` | Local CLI Tools Only | Secret access key for local administrative CLI tools. |
 
 ---
 
-## E. PREREQUISITES
+## 6. Local Development Setup
 
-### Local Development Prerequisites
-- **Node.js**: v18.0.0 or higher (v20.x recommended)
-- **npm**: v9.0.0 or higher
-- **Git**: v2.x
+### Prerequisites
+- Node.js `>= 18.0.0` (v20.x LTS recommended)
+- npm `>= 9.0.0`
+- Git `>= 2.x`
 
-### Containerization Prerequisites (Optional)
-- **Docker Engine**: v24.0+ or Docker Desktop
-- **Docker Compose**: v2.20+
+### Step-by-Step Setup (PowerShell / Bash)
 
----
-
-## F. LOCAL SETUP (WINDOWS POWERSHELL)
-
-Follow these exact steps to clone, configure, and launch FloodShield on Windows:
-
-```powershell
+```bash
 # 1. Clone the repository
 git clone https://github.com/<your-username>/FloodShield.git
-
-# 2. Change into the project directory
 cd FloodShield
 
-# 3. Install dependencies using package-lock.json
+# 2. Install dependencies deterministically
 npm ci
 
-# 4. Create local environment configuration from template
-Copy-Item .env.example .env
+# 3. Create your local environment file from the safe template
+cp .env.example .env
+# On Windows PowerShell:
+# Copy-Item .env.example .env
 
-# 5. Start the Vite local development server
+# 4. (Optional) Edit .env with your AWS API Gateway URL if connecting to cloud
+# VITE_API_BASE_URL=https://abcdef1234.execute-api.ap-south-1.amazonaws.com
+# VITE_USE_MOCK_DATA=false
+
+# 5. Start the local Vite development server
 npm run dev
 
-# 6. Open your browser and navigate to the printed local URL:
-# http://localhost:5173
+# 6. Open http://localhost:5173 in your browser
+```
 
-# 7. Run the production build to verify static bundling
+---
+
+## 7. Quality Assurance & Verification Commands
+
+FloodShield includes a suite of unit tests validating API resilience, NDMA SACHET CAP parsing, date formatting, route corridor geographic filtering, and report status persistence:
+
+```bash
+# Run unit tests
+npm test
+
+# Verify production static build
 npm run build
+
+# Run linter
+npx oxlint
 ```
 
 ---
 
-## G. ENVIRONMENT VARIABLES
+## 8. Frontend Deployment to Vercel
 
-FloodShield uses Vite standard client-side environment variables (`VITE_*`).
+FloodShield is pre-configured for deployment on [Vercel](https://vercel.com/) with single-page application routing and security headers via `vercel.json`.
 
-| Variable Name | Purpose | Required? | Example Value | Scope |
-| :--- | :--- | :--- | :--- | :--- |
-| `VITE_API_BASE_URL` | Base URL of AWS API Gateway HTTP API endpoint | Optional | `https://abc123xyz.execute-api.us-east-1.amazonaws.com` | Build time |
-| `VITE_USE_MOCK_DATA` | Switcher to toggle client-side mock/local mode | Optional | `true` | Build time |
-| `VITE_APP_ENV` | Target environment label | Optional | `hackathon` | Build time |
+### Option A: Deploy via Vercel Web Dashboard (Recommended)
 
-### Fallback Behavior
-If `VITE_API_BASE_URL` is left empty or the target backend endpoint is unreachable:
-1. `apiClient.js` gracefully handles connection timeouts.
-2. Atmospheric weather data automatically falls back to live public Open-Meteo API queries.
-3. Incident reports are stored and retrieved from browser `localStorage`.
-4. Copilot responses operate using structured client-side emergency guidance.
+1. Push your changes to your GitHub repository (see Section 11 for safe Git steps).
+2. Log into [vercel.com](https://vercel.com/) and click **"Add New..."** → **"Project"**.
+3. Import your **FloodShield** repository.
+4. Verify the **Project Settings**:
+   - **Framework Preset**: `Vite`
+   - **Root Directory**: `./` (leave default)
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+   - **Install Command**: `npm ci` or `npm install`
+5. Expand **Environment Variables** and enter:
+   - `VITE_API_BASE_URL`: Your AWS API Gateway endpoint URL (e.g. `https://abcdef1234.execute-api.ap-south-1.amazonaws.com`)
+   - `VITE_USE_MOCK_DATA`: `false`
+   - `VITE_APP_ENV`: `production`
+6. Click **Deploy**.
+7. Once deployed, test direct navigation to `/atlas`, `/safe-passage`, `/incidents`, `/scenario-lab`, and `/report` to verify SPA rewrites work seamlessly.
 
----
+### Option B: Deploy via Vercel CLI
 
-## H. DOCKER SETUP
+```bash
+# Install Vercel CLI globally (if not installed)
+npm install -g vercel
 
-FloodShield includes a production multi-stage `Dockerfile` and Nginx configuration for hosting the SPA static bundle.
+# Log in and deploy
+vercel
 
-### 1. Build the Docker Image
-```powershell
-# Build image without backend API URL (Local/Fallback mode)
-docker build -t floodshield:latest .
-
-# Build image with custom AWS API Gateway URL
-docker build --build-arg VITE_API_BASE_URL="https://your-api-id.execute-api.us-east-1.amazonaws.com" -t floodshield:latest .
+# Deploy to production
+vercel --prod
 ```
 
-### 2. Run the Container
-```powershell
-# Run container mapping host port 8080 to container port 80
-docker run -d --name floodshield-app -p 8080:80 floodshield:latest
-```
+---
 
-Open `http://localhost:8080` in your web browser.
+## 9. Existing AWS Backend Architecture & Endpoints
 
-### 3. Container Management Commands
-```powershell
-# View container logs
-docker logs -f floodshield-app
+The backend is defined in `backend/template.yaml` (AWS SAM / CloudFormation) and implemented in `backend/lambda/handler.mjs`.
 
-# Check container health status
-docker inspect --format='{{json .State.Health}}' floodshield-app
+### Supported Endpoints
 
-# Stop and remove container
-docker stop floodshield-app
-docker rm floodshield-app
-```
+All endpoints support CORS preflight (`OPTIONS`) with `Access-Control-Allow-Origin: *`.
 
-### 4. Running with Docker Compose
-```powershell
-# Start frontend container using Docker Compose
-docker compose up -d --build
+| Method | Path | Description |
+| :--- | :--- | :--- |
+| `GET` | `/health` | Backend and DynamoDB connectivity status. |
+| `GET` | `/risk` | Multi-factor risk calculation based on coordinates and precipitation. |
+| `GET` | `/reports` | Retrieves citizen reports from DynamoDB with optional `?status=` filter. |
+| `POST` | `/reports` | Validates and persists a new citizen incident report to DynamoDB. |
+| `POST` | `/reports/status` | Updates incident triage status (`UNVERIFIED`, `VERIFIED`, `DISPATCHED`, `RESOLVED`). |
+| `PATCH` | `/reports/{id}` | RESTful status update route alternative. |
+| `POST` | `/assess` | Response Copilot triage advice (Bedrock Claude 3 or deterministic engine). |
+| `POST` | `/scenarios/simulate` | Hydrodynamic simulation calculations. |
 
-# Stop container stack
-docker compose down
-```
-
-### Known Docker Limitations
-Because Vite environment variables (`VITE_*`) are statically embedded into JavaScript bundles during `npm run build`, changing `VITE_API_BASE_URL` requires rebuilding the Docker image (`docker build --build-arg ...`).
+> [!NOTE]
+> **Zero Cost at Idle**: The backend uses DynamoDB on-demand (`PAY_PER_REQUEST`), API Gateway HTTP API v2, and Lambda compute within the AWS Free Tier. Idle running cost is **$0.00/month**.
 
 ---
 
-## I. BACKEND INTEGRATION CONTRACT (PLANNED AWS API GATEWAY)
+## 10. Honest Operational Limitations
 
-When the AWS backend teammate deploys the API Gateway HTTP API, the frontend will connect using `VITE_API_BASE_URL`. Below is the agreed endpoint specification:
+In the interest of public safety and transparency:
 
-### 1. `GET /health`
-- **Purpose**: Verifies backend availability and database connection health.
-- **Expected Response (`200 OK`)**:
-  ```json
-  {
-    "status": "OK",
-    "service": "FloodShield AWS API Gateway",
-    "timestamp": "2026-10-10T15:00:00.000Z"
-  }
-  ```
-
-### 2. `POST /reports`
-- **Purpose**: Persists a citizen-submitted incident report into Amazon DynamoDB.
-- **Request Body (`application/json`)**:
-  ```json
-  {
-    "title": "Waterlogging near Bridge",
-    "location": "Lower Parel, Mumbai",
-    "category": "Waterlogging",
-    "lat": 19.0012,
-    "lng": 72.8294,
-    "waterDepthCm": 35,
-    "severity": "HIGH",
-    "description": "Submerged road section.",
-    "photoUrl": null
-  }
-  ```
-- **Expected Response (`201 Created`)**:
-  ```json
-  {
-    "success": true,
-    "ticket": {
-      "id": "INC-1728572400-842",
-      "title": "Waterlogging near Bridge",
-      "timestamp": "2026-10-10T15:00:00.000Z",
-      "status": "SUBMITTED"
-    }
-  }
-  ```
-
-### 3. `GET /reports`
-- **Purpose**: Retrieves multi-user verified citizen reports from Amazon DynamoDB.
-- **Expected Response (`200 OK`)**:
-  ```json
-  {
-    "reports": [
-      {
-        "id": "INC-1728572400-842",
-        "title": "Waterlogging near Bridge",
-        "location": "Lower Parel, Mumbai",
-        "lat": 19.0012,
-        "lng": 72.8294,
-        "waterDepthCm": 35,
-        "severity": "HIGH",
-        "timestamp": "2026-10-10T15:00:00.000Z"
-      }
-    ],
-    "count": 1
-  }
-  ```
-
-### 4. `POST /assess`
-- **Purpose**: Requests AI-assisted risk assessment and tactical response guidance via AWS Bedrock.
-- **Request Body (`application/json`)**:
-  ```json
-  {
-    "query": "Is it safe to drive near Hindmata flyover?",
-    "lat": 19.0110,
-    "lng": 72.8420
-  }
-  ```
-- **Expected Response (`200 OK`)**:
-  ```json
-  {
-    "assessment": "Severe waterlogging reported (40cm+ depth). Avoid low-lying underpasses.",
-    "riskLevel": "HIGH",
-    "recommendedActions": [
-      "Divert via Dr. B.A. Road elevated flyover",
-      "Do not attempt wading through standing water"
-    ]
-  }
-  ```
+1. **Simulated Hydrology**: Scenario Lab runoff accumulations are based on deterministic hydrodynamic formulas (rainfall rate, surface permeability, storm surge, and drainage efficiency), not real-time 3D bathymetric hydrodynamic models.
+2. **Lack of Road Passability Guarantees**: FloodShield identifies reported hazards along a 1.5 km corridor and recommends elevated detours based on elevation profile assumptions. It does **not** guarantee unmonitored roads are safe or passable, as municipal road-level sensor telemetry is not available between reporting points. Routes are labeled **"Lower reported hazard exposure"** or **"Hazard-aware route estimate"**, never "Verified 100% safe".
+3. **NDMA SACHET Regional Alerts**: Official government disaster warnings are broad district- or state-level advisories. They must not be interpreted as exact street-level road closures unless specific street evidence exists.
+4. **Data Provenance**: Every displayed report clearly identifies whether it originates from `AWS-SYNCED INCIDENT` or `LOCAL-ONLY INCIDENT`.
 
 ---
 
-## J. TROUBLESHOOTING
+## 11. DevSecOps & Security Best Practices
 
-### 1. `npm install` or `npm ci` Failures
-- Ensure Node.js version is `>= 18.0.0` (`node -v`).
-- Clear npm cache if locks mismatch: `npm cache clean --force`.
-
-### 2. Map Tiles Not Rendering
-- Verify active internet connection (OpenStreetMap tiles require public network access).
-- Check browser developer tools console for network blockages or CORS extensions interfering with tile requests.
-
-### 3. Geolocation Auto-Detect Not Working
-- Modern web browsers require a **Secure Context (`https://` or `http://localhost`)** to access `navigator.geolocation`.
-- Ensure browser location permissions are granted for `localhost`.
-
-### 4. Direct Refresh on Subpages Returns 404 in Production
-- Ensure Nginx or your production web server has single-page application fallback enabled (`try_files $uri $uri/ /index.html;`). This is pre-configured in `nginx.conf`.
+1. **Secret Isolation**:
+   - `.env` and `backend/.env` are strictly excluded in `.gitignore` and `.dockerignore`.
+   - Never commit AWS access keys (`AKIA...`), secret keys, or private key files (`*.pem`, `*.key`) to Git.
+   - Use `.env.example` and `backend/.env.example` as sanitized templates.
+2. **Public Bundle Protection**:
+   - Only variables prefixed with `VITE_*` are bundled into the Vite build.
+   - The browser frontend NEVER receives AWS credentials; it communicates exclusively through HTTPS with the API Gateway endpoint.
+3. **IAM Least Privilege**:
+   - In production AWS environments, execute backend Lambdas using IAM execution roles with scoped DynamoDB policies (`DynamoDBCrudPolicy`), never long-lived IAM user access keys.
+4. **Single-Page Application Security**:
+   - `vercel.json` and `nginx.conf` include security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and strict referrer policies.
 
 ---
 
-## K. SECURITY AND LIMITATIONS
+## License
 
-1. **Environment Secrets**: Never commit `.env` files containing private credentials or keys. `VITE_*` variables are embedded into browser JavaScript bundles and are publicly readable by clients.
-2. **Local Storage Scoping**: Browser `localStorage` is isolated per browser profile and device. It does not synchronize data between different devices or users.
-3. **API Rate Limits**: Public services (Open-Meteo weather and Nominatim geocoding) enforce public usage policies and request rate limits.
-4. **Non-Official Advisory Notice**: FloodShield citizen reports and simulation models are designed for informational hackathon demonstration purposes. Official municipal emergency instructions always take precedence during natural flood disasters.
-
----
-
-## LICENSE
-
-Distributed under the MIT License for environmental hackathon development.
+Distributed under the MIT License.

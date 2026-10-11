@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: FloodShield AI-Powered Hyperlocal Flood Early-Warning Serverless Backend
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: hackathon
+    Description: Deployment stage environment name (e.g., hackathon, dev, prod)
+  EnableBedrock:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable Amazon Bedrock generative triage inference if model access is active
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-haiku-20240307-v1:0
+    Description: Amazon Bedrock Foundation Model ID
+
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 256
+    Runtime: nodejs20.x
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+  # 1. DynamoDB Table for Citizen Incidents (Pay-Per-Request: $0 Idle Cost)
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub FloodShield-Incidents-${EnvironmentName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: StatusTimestampIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+      Tags:
+        - Key: Project
+          Value: FloodShield
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # 2. CloudWatch Log Group with 7-Day Retention (Cost Guardrail)
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/FloodShieldBackend-${EnvironmentName}
+      RetentionInDays: 7
+
+  # 3. HTTP API Gateway (API Gateway v2 - Lowest Latency & Cost)
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub FloodShield-HttpApi-${EnvironmentName}
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Requested-With
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - OPTIONS
+        MaxAge: 600
+
+  # 4. Lambda Function Handler
+  BackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub FloodShieldBackend-${EnvironmentName}
+      CodeUri: .
+      Handler: lambda/handler.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref IncidentsTable
+          ENABLE_BEDROCK: !Ref EnableBedrock
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          APP_ENV: !Ref EnvironmentName
+      Policies:
+        # DynamoDB Read/Write Policy for Incidents Table
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        # CloudWatch Logs Basic Execution
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt BackendLogGroup.Arn
+        # Bedrock InvokeModel Permission
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: '*'
+      Events:
+        RootGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /
+            Method: GET
+        HealthGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+        RiskGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /risk
+            Method: GET
+        ReportsGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reports
+            Method: GET
+        ReportsPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reports
+            Method: POST
+        ReportsPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reports/{id}
+            Method: PATCH
+        ReportsStatusPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reports/status
+            Method: POST
+        AssessPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /assess
+            Method: POST
+        ScenariosPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /scenarios/simulate
+            Method: POST
+
+Outputs:
+  ApiEndpointUrl:
+    Description: Base HTTP URL for the FloodShield API Gateway Endpoint
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+    Export:
+      Name: !Sub FloodShield-ApiUrl-${EnvironmentName}
+  IncidentsTableName:
+    Description: Name of the DynamoDB Incidents Table
+    Value: !Ref IncidentsTable
+  LambdaFunctionArn:
+    Description: ARN of the deployed FloodShield Lambda Function
+    Value: !GetAtt BackendFunction.Arn

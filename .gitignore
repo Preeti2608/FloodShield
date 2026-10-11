@@ -7,12 +7,28 @@ dist-ssr/
 
 # Environment files and secrets
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
 .env.*
+.env.local
+.env.*.local
+backend/.env
+backend/.env.*
+backend/.env.local
+backend/.env.*.local
 !.env.example
+!backend/.env.example
+
+# Secret keys and certificates
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+
+# Vercel deployment artifacts
+.vercel/
+
+# AWS SAM build artifacts
+.aws-sam/
 
 # Logs
 logs
@@ -26,6 +42,7 @@ lerna-debug.log*
 .vscode/*
 !.vscode/extensions.json
 .idea
+.qodo/
 .DS_Store
 *.suo
 *.ntvs*
@@ -33,8 +50,11 @@ lerna-debug.log*
 *.sln
 *.sw?
 Thumbs.db
+Desktop.ini
+ehthumbs.db
 
 # Temporary scratch & test coverage
 scratch/
 coverage/
+.tmp/
 .tmp

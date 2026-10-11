@@ -45,7 +45,7 @@ export default function HeroGallery({ navigateTo, reducedMotion }) {
       route: "/copilot",
       image: "/images/panel_copilot.jpg",
       tag: "DECISION SUPPORT ENGINE",
-      status: "MODEL ACCURACY 94.2%",
+      status: "DETERMINISTIC TRIAGE ENGINE",
       riskBadge: "AI COPILOT READY",
       riskColor: "lime",
       icon: Bot

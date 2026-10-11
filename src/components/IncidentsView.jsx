@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, CheckCircle, ShieldAlert, Send, Eye, CheckCircle2, Clock, Inbox, PlusCircle } from 'lucide-react';
-import { getReports } from '../api/apiClient';
+import { AlertTriangle, CheckCircle, Send, Eye, CheckCircle2, Clock, Inbox, PlusCircle } from 'lucide-react';
+import { getReports, updateReportStatus } from '../api/apiClient';
+import { matchesStatusFilter, getActiveIncidentsCount } from '../utils/incidentStatus';
+import { getIncidentProvenanceLabel, getProvenanceBadgeClass } from '../utils/provenance';
 
 export default function IncidentsView({ incidents = [], onUpdateIncident, navigateTo }) {
   const [incidentList, setIncidentList] = useState([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedId, setSelectedId] = useState(null);
   const [dataMode, setDataMode] = useState('UNAVAILABLE');
+  const [actionFeedback, setActionFeedback] = useState(null);
 
   useEffect(() => {
     getReports().then((res) => {
@@ -17,16 +20,24 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
         setSelectedId(list[0].id);
       }
     });
-  }, [incidents]);
+  }, [incidents, selectedId]);
 
-  const filteredIncidents = incidentList.filter(inc => {
-    if (statusFilter === 'ALL') return true;
-    return inc.status === statusFilter;
-  });
+  const activeCount = getActiveIncidentsCount(incidentList);
 
-  const selectedIncident = incidentList.find(inc => inc.id === selectedId) || filteredIncidents[0];
+  const filteredIncidents = incidentList.filter(inc => matchesStatusFilter(inc, statusFilter));
 
-  const handleAction = (incidentId, newStatus, actionText) => {
+  const selectedIncident = incidentList.find(inc => inc.id === selectedId) || filteredIncidents[0] || incidentList[0];
+
+  const handleFilterChange = (st) => {
+    setStatusFilter(st);
+    const newFiltered = incidentList.filter(inc => matchesStatusFilter(inc, st));
+    if (newFiltered.length > 0 && !newFiltered.some(inc => inc.id === selectedId)) {
+      setSelectedId(newFiltered[0].id);
+    }
+  };
+
+  const handleAction = async (incidentId, newStatus, actionText) => {
+    setActionFeedback(null);
     const updated = incidentList.map(item => {
       if (item.id === incidentId) {
         return {
@@ -39,6 +50,30 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
     });
     setIncidentList(updated);
     if (onUpdateIncident) onUpdateIncident(updated);
+    
+    // Synchronize status update to backend / local storage
+    const result = await updateReportStatus(incidentId, newStatus, actionText);
+    if (result.persistedToCloud) {
+      setActionFeedback({
+        type: 'success',
+        message: `Status transitioned to ${newStatus} and persisted to AWS DynamoDB.`
+      });
+    } else if (result.cloudFailed) {
+      setActionFeedback({
+        type: 'warning',
+        message: `AWS cloud sync failed. Status transitioned to ${newStatus} in local storage only.`
+      });
+    } else if (result.localOnly) {
+      setActionFeedback({
+        type: 'info',
+        message: `Status transitioned to ${newStatus} in browser local storage.`
+      });
+    } else if (!result.success) {
+      setActionFeedback({
+        type: 'error',
+        message: `Failed to update status: ${result.error || 'Unknown error'}`
+      });
+    }
   };
 
   return (
@@ -56,7 +91,7 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
           {['ALL', 'UNVERIFIED', 'VERIFIED', 'DISPATCHED', 'RESOLVED'].map(st => (
             <button
               key={st}
-              onClick={() => setStatusFilter(st)}
+              onClick={() => handleFilterChange(st)}
               className={`status-filter-btn ${statusFilter === st ? 'active' : ''}`}
             >
               {st}
@@ -71,7 +106,7 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
         <div className="incident-feed-panel editorial-card">
           <div className="feed-header-strip">
             <AlertTriangle size={14} color="var(--color-orange)" />
-            <span className="mono header-title">ACTIVE INCIDENTS ({filteredIncidents.length})</span>
+            <span className="mono header-title">ACTIVE INCIDENTS ({activeCount})</span>
             <span className="badge badge-grey mono">{dataMode}</span>
           </div>
 
@@ -134,6 +169,15 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
           <div className="triage-console-panel editorial-card">
             <div className="console-header-strip">
               <span className="mono header-title">RESPONDER TRIAGE CONSOLE</span>
+              <span className="mono" style={{
+                marginLeft: 'auto',
+                marginRight: '12px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                color: selectedIncident.status === 'RESOLVED' ? 'var(--color-lime)' : 'var(--color-orange)'
+              }}>
+                STATUS: {selectedIncident.status}
+              </span>
               <span className="mono inc-id">{selectedIncident.id}</span>
             </div>
 
@@ -144,10 +188,19 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
                   <span className={`badge ${selectedIncident.severity === 'CRITICAL' ? 'badge-red' : 'badge-orange'}`}>
                     {selectedIncident.severity} PRIORITY
                   </span>
-                  <span className="badge badge-grey">MODE: {selectedIncident.dataMode || 'USER-REPORTED'}</span>
+                  <span className={`badge ${
+                    selectedIncident.status === 'RESOLVED' ? 'badge-lime' :
+                    selectedIncident.status === 'VERIFIED' ? 'badge-amber' :
+                    selectedIncident.status === 'DISPATCHED' ? 'badge-orange' : 'badge-grey'
+                  }`}>
+                    STATUS: {selectedIncident.status}
+                  </span>
+                  <span className={`badge ${getProvenanceBadgeClass(getIncidentProvenanceLabel(selectedIncident))}`}>
+                    {getIncidentProvenanceLabel(selectedIncident)}
+                  </span>
                 </div>
                 <h3 className="console-title">{selectedIncident.title}</h3>
-                <p className="console-loc mono">{selectedIncident.location} • Reported by {selectedIncident.reporter}</p>
+                <p className="console-loc mono">{selectedIncident.location} • Reported by {selectedIncident.reporter || 'Citizen'}</p>
               </div>
 
               {/* Description & Evidence */}
@@ -168,6 +221,22 @@ export default function IncidentsView({ incidents = [], onUpdateIncident, naviga
               {/* Action Console Buttons for Responders */}
               <div className="action-buttons-section">
                 <span className="label-uppercase">RESPONDER TRIAGE ACTIONS</span>
+
+                {actionFeedback && (
+                  <div className="mono" style={{
+                    padding: '8px 12px',
+                    borderRadius: '3px',
+                    fontSize: '0.74rem',
+                    marginBottom: '12px',
+                    border: '1px solid',
+                    borderColor: actionFeedback.type === 'success' ? 'var(--color-lime)' : actionFeedback.type === 'warning' ? 'var(--color-amber)' : actionFeedback.type === 'error' ? 'var(--color-red)' : 'var(--border-subtle)',
+                    color: actionFeedback.type === 'success' ? 'var(--color-lime)' : actionFeedback.type === 'warning' ? 'var(--color-amber)' : actionFeedback.type === 'error' ? 'var(--color-red)' : 'var(--color-ivory)',
+                    background: 'rgba(255, 255, 255, 0.04)'
+                  }}>
+                    {actionFeedback.message}
+                  </div>
+                )}
+
                 <div className="action-btn-grid">
                   <button 
                     onClick={() => handleAction(selectedIncident.id, 'VERIFIED', 'Status updated to VERIFIED by Responder Console')}

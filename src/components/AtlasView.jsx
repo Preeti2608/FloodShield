@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Search, Navigation, Compass, CloudRain, Thermometer, Wind, Bell, Info, RefreshCw, X, ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, Layers } from 'lucide-react';
+import { Search, Navigation, Compass, CloudRain, Thermometer, Wind, Bell, Info, RefreshCw, X, ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, Layers, ShieldAlert, ExternalLink } from 'lucide-react';
 import { fetchRealWeather } from '../api/weatherApi';
 import { searchGeocodeLocation } from '../api/geocodingApi';
-import { getStoredReports } from '../utils/reportStorage';
+import { getReports, getOfficialWarnings, formatAlertTime, formatAlertDateTime } from '../api/apiClient';
 import { calculateDistanceKm } from '../utils/distance';
 import { getAlertPreferences, saveAlertPreferences, requestBrowserNotificationPermission, generateGenuineAlerts } from '../utils/alertManager';
+import { getIncidentProvenanceLabel, getProvenanceBadgeClass } from '../utils/provenance';
 
 // Leaflet map bounds setter helper component
 function MapController({ center, zoom, bounds }) {
@@ -87,15 +88,73 @@ export default function AtlasView() {
   const [isLegendOpen, setIsLegendOpen] = useState(true);
   const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false);
   const [isAlertSettingsOpen, setIsAlertSettingsOpen] = useState(false);
+  const [alertActiveTab, setAlertActiveTab] = useState('ALL'); // 'ALL' | 'OFFICIAL' | 'COMMUNITY' | 'WEATHER'
   const [alertPrefs, setAlertPrefs] = useState(getAlertPreferences());
   const [notifMessage, setNotifMessage] = useState('');
+
+  // Official Warnings Feed State (Genuine NDMA SACHET Government Feed Integration)
+  const [officialFeedState, setOfficialFeedState] = useState({
+    loading: true,
+    connected: false,
+    status: 'CHECKING',
+    error: null,
+    message: '',
+    warnings: [],
+    allAlerts: [],
+    totalNationalAlerts: 0,
+    portalUrl: 'https://sachet.ndma.gov.in/CapFeed',
+    isCorsBlocked: false,
+    lastSuccessfulFetch: null
+  });
 
   // Selected Marker Inspector
   const [selectedMarkerDetail, setSelectedMarkerDetail] = useState(null);
 
-  // Load User Reports on Mount
+  // Load Official Government Warnings Feed
+  const loadOfficialWarnings = async () => {
+    setOfficialFeedState(prev => ({ ...prev, loading: true }));
+    try {
+      const res = await getOfficialWarnings();
+      setOfficialFeedState({
+        loading: false,
+        connected: res.connected,
+        status: res.status,
+        error: res.error || null,
+        message: res.message || '',
+        warnings: res.warnings || [],
+        allAlerts: res.allAlerts || [],
+        totalNationalAlerts: res.totalNationalAlerts || 0,
+        portalUrl: res.portalUrl || 'https://sachet.ndma.gov.in/CapFeed',
+        isCorsBlocked: res.isCorsBlocked || false,
+        lastSuccessfulFetch: res.lastSuccessfulFetch || null
+      });
+    } catch {
+      setOfficialFeedState(prev => ({
+        ...prev,
+        loading: false,
+        connected: false,
+        status: 'FEED_UNAVAILABLE',
+        error: 'Official warning feed currently unavailable',
+        message: 'Live official government alert streams (NDMA SACHET / CWC / IMD) are unreachable.',
+        warnings: []
+      }));
+    }
+  };
+
+  // Initial load and modest refresh interval: 5 minutes (never retry continuously)
   useEffect(() => {
-    setUserReports(getStoredReports());
+    loadOfficialWarnings();
+    const intervalId = setInterval(() => {
+      loadOfficialWarnings();
+    }, 300000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  // Load User Reports on Mount (DynamoDB or LocalStorage fallback)
+  useEffect(() => {
+    getReports().then(res => {
+      setUserReports(res.reports || []);
+    });
   }, []);
 
   // Fetch Weather whenever center coordinates change
@@ -215,13 +274,14 @@ export default function AtlasView() {
     typeof r.lat === 'number' && typeof r.lng === 'number' && !isNaN(r.lat) && !isNaN(r.lng)
   );
 
-  // Genuine Alerts List
+  // Genuine Alerts List (distinguishes official, community, and weather)
   const genuineAlerts = generateGenuineAlerts(
     weatherData, 
     userReports, 
     radiusKm === 'ALL' ? 50 : Number(radiusKm),
     mapCenter[0],
-    mapCenter[1]
+    mapCenter[1],
+    officialFeedState.warnings
   );
 
   const handleSavePrefs = (newPrefs) => {
@@ -390,43 +450,106 @@ export default function AtlasView() {
                 </div>
               ) : (
                 <div className="radius-reports-list">
-                  {filteredReportsByRadius.map(rep => (
-                    <div
-                      key={rep.id}
-                      onClick={() => {
-                        setSelectedMarkerDetail({
-                          type: 'USER-REPORTED INCIDENT · LOCAL STORAGE',
-                          title: rep.title,
-                          location: rep.location,
-                          lat: rep.lat,
-                          lng: rep.lng,
-                          timestamp: rep.timestamp,
-                          severity: rep.severity,
-                          dataMode: rep.dataMode,
-                          description: rep.description
-                        });
-                      }}
-                      className="radius-report-card mono"
-                    >
-                      <div className="rep-card-top">
-                        <span className="rep-id">{rep.id}</span>
-                        <span className="badge badge-orange">{rep.severity}</span>
+                  {filteredReportsByRadius.map(rep => {
+                    const provLabel = getIncidentProvenanceLabel(rep);
+                    const provBadge = getProvenanceBadgeClass(provLabel);
+
+                    return (
+                      <div
+                        key={rep.id}
+                        onClick={() => {
+                          setSelectedMarkerDetail({
+                            type: provLabel,
+                            badgeClass: provBadge,
+                            title: rep.title,
+                            location: rep.location,
+                            lat: rep.lat,
+                            lng: rep.lng,
+                            timestamp: rep.timestamp,
+                            severity: rep.severity,
+                            status: rep.status,
+                            waterDepthCm: rep.waterDepthCm,
+                            dataMode: rep.dataMode,
+                            description: rep.description
+                          });
+                        }}
+                        className="radius-report-card mono"
+                      >
+                        <div className="rep-card-top">
+                          <span className="rep-id">{rep.id}</span>
+                          <span className={`badge ${provBadge}`} style={{ fontSize: '0.62rem' }}>
+                            {provLabel}
+                          </span>
+                          <span className="badge badge-orange">{rep.severity}</span>
+                        </div>
+                        <div className="rep-title">{rep.title}</div>
+                        <div className="rep-loc">{rep.location}</div>
+                        <div className="rep-coords mono">
+                          {rep.lat != null ? `${rep.lat.toFixed(4)}°N, ${rep.lng.toFixed(4)}°E` : 'Coordinates: Unavailable (List only)'}
+                        </div>
                       </div>
-                      <div className="rep-title">{rep.title}</div>
-                      <div className="rep-loc">{rep.location}</div>
-                      <div className="rep-coords mono">
-                        {rep.lat != null ? `${rep.lat.toFixed(4)}°N, ${rep.lng.toFixed(4)}°E` : 'Coordinates: Unavailable (List only)'}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
 
             {/* Official Warnings Status */}
             <div className="official-status-card mono">
-              <span className="label-uppercase">OFFICIAL FLOOD WARNINGS</span>
-              <div className="status-sub">Awaiting AWS backend official civil alert stream.</div>
+              <div className="official-card-top">
+                <span className="label-uppercase">OFFICIAL FLOOD WARNINGS</span>
+                <span className={`badge ${officialFeedState.connected && officialFeedState.warnings.length > 0 ? 'badge-lime' : officialFeedState.connected ? 'badge-cyan' : 'badge-amber'}`}>
+                  {officialFeedState.loading ? 'CHECKING...' : officialFeedState.connected && officialFeedState.warnings.length > 0 ? 'LIVE NDMA FEED' : officialFeedState.connected ? 'NDMA CONNECTED' : 'FEED RESTRICTED'}
+                </span>
+              </div>
+              {officialFeedState.loading ? (
+                <div className="status-sub">Checking official NDMA SACHET government feed...</div>
+              ) : officialFeedState.connected && officialFeedState.warnings.length > 0 ? (
+                <div className="status-sub" style={{ color: 'var(--color-lime)' }}>
+                  {officialFeedState.warnings.length} active official flood warning(s) in effect ({officialFeedState.totalNationalAlerts} national alerts active).
+                </div>
+              ) : officialFeedState.connected && officialFeedState.warnings.length === 0 ? (
+                <div className="status-sub" style={{ color: 'var(--color-lime)' }}>
+                  NDMA feed connected. 0 active flood warnings matching ({officialFeedState.totalNationalAlerts} other national alerts).
+                </div>
+              ) : (
+                <div className="official-feed-unavailable-box">
+                  <div className="feed-unavail-title">
+                    <ShieldAlert size={14} color="var(--color-amber)" />
+                    <span>Official warning feed currently unavailable</span>
+                  </div>
+                  <p className="feed-unavail-desc">
+                    NDMA SACHET feed requires server proxy for browser cross-origin requests. Citizen triage & weather radar remain active.
+                  </p>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                <button 
+                  onClick={() => {
+                    setAlertActiveTab('OFFICIAL');
+                    setIsAlertCenterOpen(true);
+                  }} 
+                  className="view-official-feed-btn mono"
+                  style={{ flex: 1 }}
+                >
+                  <span>VIEW OFFICIAL ALERTS</span>
+                </button>
+                <button
+                  onClick={loadOfficialWarnings}
+                  disabled={officialFeedState.loading}
+                  title="Manual refresh"
+                  style={{
+                    background: 'var(--bg-card-header)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '4px',
+                    color: 'var(--color-grey-light)',
+                    padding: '0 8px',
+                    cursor: officialFeedState.loading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  <RefreshCw size={13} className={officialFeedState.loading ? 'spin-icon' : ''} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -499,34 +622,51 @@ export default function AtlasView() {
             )}
 
             {/* 3. User-Reported Incident Markers (ONLY for reports with valid numeric lat & lng) */}
-            {reportsWithValidCoords.map(rep => (
-              <Marker
-                key={rep.id}
-                position={[rep.lat, rep.lng]}
-                icon={createMarkerIcon('user_report')}
-                eventHandlers={{
-                  click: () => setSelectedMarkerDetail({
-                    type: 'USER-REPORTED INCIDENT · LOCAL STORAGE',
-                    title: rep.title,
-                    location: rep.location,
-                    lat: rep.lat,
-                    lng: rep.lng,
-                    timestamp: rep.timestamp,
-                    severity: rep.severity,
-                    dataMode: rep.dataMode,
-                    description: rep.description
-                  })
-                }}
-              >
-                <Popup>
-                  <div className="map-popup-body mono">
-                    <strong>{rep.title}</strong>
-                    <div>{rep.location}</div>
-                    <div>Depth: {rep.waterDepthCm}cm ({rep.severity})</div>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
+            {reportsWithValidCoords.map(rep => {
+              const provLabel = getIncidentProvenanceLabel(rep);
+              const provBadge = getProvenanceBadgeClass(provLabel);
+
+              return (
+                <Marker
+                  key={rep.id}
+                  position={[rep.lat, rep.lng]}
+                  icon={createMarkerIcon('user_report')}
+                  eventHandlers={{
+                    click: () => setSelectedMarkerDetail({
+                      type: provLabel,
+                      badgeClass: provBadge,
+                      title: rep.title,
+                      location: rep.location,
+                      lat: rep.lat,
+                      lng: rep.lng,
+                      timestamp: rep.timestamp,
+                      severity: rep.severity,
+                      status: rep.status,
+                      waterDepthCm: rep.waterDepthCm,
+                      dataMode: rep.dataMode,
+                      description: rep.description
+                    })
+                  }}
+                >
+                  <Popup>
+                    <div className="map-popup-body mono">
+                      <div style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        color: provLabel === 'AWS-SYNCED INCIDENT' ? 'var(--color-lime)' : 'var(--color-orange)',
+                        marginBottom: '4px'
+                      }}>
+                        {provLabel}
+                      </div>
+                      <strong>{rep.title}</strong>
+                      <div>{rep.location}</div>
+                      <div>Depth: {rep.waterDepthCm}cm ({rep.severity})</div>
+                      {rep.status && <div style={{ fontSize: '0.7rem', color: 'var(--color-grey)', marginTop: '2px' }}>STATUS: {rep.status}</div>}
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
           </MapContainer>
 
           {/* Interactive Map Legend */}
@@ -569,7 +709,7 @@ export default function AtlasView() {
               <div className="real-weather-card mono">
                 <div className="weather-top-row">
                   <span className="badge badge-lime">LIVE OPEN-METEO WEATHER</span>
-                  <span className="weather-time">{new Date(weatherData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="weather-time">{formatAlertTime(weatherData.timestamp)}</span>
                 </div>
 
                 <div className="weather-metrics-grid">
@@ -613,7 +753,9 @@ export default function AtlasView() {
             {selectedMarkerDetail ? (
               <div className="selected-detail-box mono animate-fade-in">
                 <div className="detail-top">
-                  <span className="badge badge-orange">{selectedMarkerDetail.type}</span>
+                  <span className={`badge ${selectedMarkerDetail.badgeClass || getProvenanceBadgeClass(selectedMarkerDetail.type)}`}>
+                    {selectedMarkerDetail.type}
+                  </span>
                   <button onClick={() => setSelectedMarkerDetail(null)} className="close-detail-btn"><X size={14} /></button>
                 </div>
 
@@ -622,7 +764,10 @@ export default function AtlasView() {
                 <div className="detail-row">
                   <strong>Coordinates:</strong> {selectedMarkerDetail.lat != null ? `${selectedMarkerDetail.lat.toFixed(4)}°N, ${selectedMarkerDetail.lng.toFixed(4)}°E` : 'Unavailable (Not displayed on map)'}
                 </div>
-                {selectedMarkerDetail.timestamp && <div className="detail-row"><strong>Timestamp:</strong> {new Date(selectedMarkerDetail.timestamp).toLocaleString()}</div>}
+                {selectedMarkerDetail.status && <div className="detail-row"><strong>Status:</strong> {selectedMarkerDetail.status}</div>}
+                {selectedMarkerDetail.severity && <div className="detail-row"><strong>Severity:</strong> {selectedMarkerDetail.severity}</div>}
+                {selectedMarkerDetail.waterDepthCm != null && <div className="detail-row"><strong>Water Depth:</strong> {selectedMarkerDetail.waterDepthCm} cm</div>}
+                {selectedMarkerDetail.timestamp && <div className="detail-row"><strong>Timestamp:</strong> {formatAlertDateTime(selectedMarkerDetail.timestamp)}</div>}
                 {selectedMarkerDetail.accuracy && <div className="detail-row"><strong>GPS Accuracy:</strong> {selectedMarkerDetail.accuracy}</div>}
                 {selectedMarkerDetail.description && <div className="detail-row"><strong>Description:</strong> {selectedMarkerDetail.description}</div>}
               </div>
@@ -678,21 +823,265 @@ export default function AtlasView() {
               </div>
             )}
 
-            {/* Alert Items List */}
-            <div className="alerts-scroll-list">
-              {genuineAlerts.map(alt => (
-                <div key={alt.id} className={`alert-item-card ${alt.type === 'WEATHER WATCH' ? 'watch-card' : ''}`}>
-                  <div className="alt-top">
-                    <span className={`badge ${alt.type === 'WEATHER WATCH' ? 'badge-amber' : alt.type === 'USER-REPORTED INCIDENT' ? 'badge-orange' : 'badge-grey'}`}>
-                      {alt.type}
-                    </span>
-                    <span className="alt-time">{new Date(alt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                  <strong className="alt-title">{alt.title}</strong>
-                  <div className="alt-loc">{alt.location} • {alt.source}</div>
-                  <p className="alt-exp">{alt.explanation}</p>
+            {/* Alert Categories Tab Bar */}
+            <div className="alert-tabs-bar mono">
+              <button 
+                onClick={() => setAlertActiveTab('ALL')}
+                className={`alert-tab-btn ${alertActiveTab === 'ALL' ? 'active' : ''}`}
+              >
+                ALL ({genuineAlerts.length})
+              </button>
+              <button 
+                onClick={() => setAlertActiveTab('OFFICIAL')}
+                className={`alert-tab-btn ${alertActiveTab === 'OFFICIAL' ? 'active' : ''}`}
+              >
+                OFFICIAL ({officialFeedState.warnings.length})
+              </button>
+              <button 
+                onClick={() => setAlertActiveTab('COMMUNITY')}
+                className={`alert-tab-btn ${alertActiveTab === 'COMMUNITY' ? 'active' : ''}`}
+              >
+                COMMUNITY ({genuineAlerts.filter(a => a.category === 'COMMUNITY').length})
+              </button>
+              <button 
+                onClick={() => setAlertActiveTab('WEATHER')}
+                className={`alert-tab-btn ${alertActiveTab === 'WEATHER' ? 'active' : ''}`}
+              >
+                WEATHER WATCH ({genuineAlerts.filter(a => a.category === 'WEATHER').length})
+              </button>
+            </div>
+
+            {/* Official Warnings Feed Metadata Bar */}
+            {alertActiveTab === 'OFFICIAL' && (
+              <div className="official-feed-meta-bar mono">
+                <div className="meta-bar-left">
+                  <span className="meta-label">GOVT STREAM:</span>
+                  <a 
+                    href={officialFeedState.portalUrl || 'https://sachet.ndma.gov.in/CapFeed'} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="meta-portal-link"
+                  >
+                    <span>NDMA SACHET (sachet.ndma.gov.in)</span>
+                    <ExternalLink size={11} />
+                  </a>
+                  <span className="meta-sep">|</span>
+                  <span className="meta-time">
+                    Last fetch: {officialFeedState.lastSuccessfulFetch ? formatAlertDateTime(officialFeedState.lastSuccessfulFetch) : (officialFeedState.loading ? 'Fetching...' : 'Not connected')}
+                  </span>
                 </div>
-              ))}
+                <button
+                  onClick={loadOfficialWarnings}
+                  disabled={officialFeedState.loading}
+                  className="meta-refresh-btn mono"
+                >
+                  <RefreshCw size={11} className={officialFeedState.loading ? 'spin-icon' : ''} />
+                  <span>{officialFeedState.loading ? 'CHECKING...' : 'REFRESH FEED'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Scrollable Alert List Container (Only this section scrolls) */}
+            <div className="alerts-scroll-list">
+              {/* Official Warnings Loading State */}
+              {alertActiveTab === 'OFFICIAL' && officialFeedState.loading && (
+                <div className="official-loading-box mono">
+                  <RefreshCw size={20} className="spin-icon" color="var(--color-lime)" />
+                  <span>Querying official NDMA SACHET disaster warning portal...</span>
+                </div>
+              )}
+
+              {/* State A: Feed unavailable or blocked (CORS) */}
+              {alertActiveTab === 'OFFICIAL' && !officialFeedState.loading && (!officialFeedState.connected || officialFeedState.error) && (
+                <div className="official-feed-error-state mono">
+                  <div className="error-header-row">
+                    <ShieldAlert size={22} color="var(--color-amber)" />
+                    <h4>{officialFeedState.isCorsBlocked ? 'NDMA SACHET Feed Restricted by Browser CORS' : 'Official Warning Feed Currently Unavailable'}</h4>
+                  </div>
+                  <p className="error-body-text">
+                    {officialFeedState.message}
+                  </p>
+                  <div className="integrity-guarantee-note">
+                    <strong>DATA INTEGRITY COMMITMENT:</strong> FloodShield strictly does not fabricate government alerts, simulate civil emergencies, or label citizen reports or Open-Meteo forecasts as official notices.
+                  </div>
+                  <div className="telemetry-info-row">
+                    <span>FEED STATUS:</span> <code>{officialFeedState.isCorsBlocked ? 'CORS_RESTRICTED (ACCESS VIA OFFICIAL PORTAL)' : 'OFFICIAL STREAM DISCONNECTED (UNAVAILABLE)'}</code>
+                  </div>
+                  <div style={{ marginTop: '8px' }}>
+                    <a
+                      href={officialFeedState.portalUrl || 'https://sachet.ndma.gov.in/CapFeed'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="view-official-feed-btn mono"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        textDecoration: 'none',
+                        padding: '8px 14px',
+                        borderRadius: '4px',
+                        background: 'rgba(0, 229, 255, 0.1)',
+                        border: '1px solid var(--color-cyan)',
+                        color: 'var(--color-cyan)',
+                        fontWeight: 600,
+                        fontSize: '0.75rem'
+                      }}
+                    >
+                      <span>VIEW LIVE ALERTS ON OFFICIAL NDMA SACHET PORTAL</span>
+                      <ExternalLink size={13} />
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* State B: Connected, but no active matching flood alerts */}
+              {alertActiveTab === 'OFFICIAL' && !officialFeedState.loading && officialFeedState.connected && officialFeedState.warnings.length === 0 && (
+                <div className="official-feed-empty-state mono">
+                  <CheckCircle2 size={22} color="var(--color-lime)" />
+                  <h4>No Active Matching Official Flood Warnings</h4>
+                  <p>
+                    Official NDMA SACHET civil defense stream is connected ({officialFeedState.totalNationalAlerts} national emergency advisories active across India). No active flood or heavy rainfall warnings match the criteria at this time.
+                  </p>
+                  <div style={{ marginTop: '8px' }}>
+                    <a
+                      href={officialFeedState.portalUrl || 'https://sachet.ndma.gov.in/CapFeed'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: 'var(--color-cyan)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.74rem',
+                        textDecoration: 'none'
+                      }}
+                    >
+                      <span>Browse all national disaster advisories on SACHET portal</span>
+                      <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Alert Items List */}
+              {genuineAlerts
+                .filter(alt => {
+                  if (alertActiveTab === 'ALL') return true;
+                  if (alertActiveTab === 'OFFICIAL') return alt.category === 'OFFICIAL';
+                  if (alertActiveTab === 'COMMUNITY') return alt.category === 'COMMUNITY';
+                  if (alertActiveTab === 'WEATHER') return alt.category === 'WEATHER';
+                  return true;
+                })
+                .map(alt => (
+                  <div 
+                    key={alt.id} 
+                    className={`alert-item-card ${alt.category === 'OFFICIAL' ? 'official-card' : alt.category === 'WEATHER' ? 'watch-card' : 'community-card'}`}
+                  >
+                    <div className="alt-top">
+                      <span className={`badge ${
+                        alt.category === 'OFFICIAL' ? 'badge-red' : 
+                        alt.category === 'WEATHER' ? 'badge-amber' : 
+                        'badge-orange'
+                      }`}>
+                        {alt.category === 'OFFICIAL' ? `OFFICIAL ALERT · ${alt.severity || 'GOVT'}` : alt.type}
+                      </span>
+                      <span className="alt-time">
+                        {alt.category === 'OFFICIAL' ? (
+                          alt.sentTime ? `Issued: ${formatAlertDateTime(alt.sentTime)}` :
+                          alt.effectiveStartTime || alt.startTime ? `Effective: ${formatAlertDateTime(alt.effectiveStartTime || alt.startTime)}` :
+                          'Time unavailable'
+                        ) : alt.category === 'WEATHER' ? (
+                          `Observed: ${formatAlertDateTime(alt.timestamp)}`
+                        ) : (
+                          `Reported: ${formatAlertDateTime(alt.timestamp)}`
+                        )}
+                      </span>
+                    </div>
+
+                    <strong className="alt-title">{alt.title}</strong>
+                    
+                    <div className="alt-loc">
+                      <span><strong>Source:</strong> {alt.source}</span>
+                      {alt.event && (
+                        <>
+                          <span> • </span>
+                          <span><strong>Event:</strong> {alt.event}</span>
+                        </>
+                      )}
+                      <span> • </span>
+                      <span><strong>Area:</strong> {alt.affectedArea || alt.location}</span>
+                      {alt.severityLevel && (
+                        <>
+                          <span> • </span>
+                          <span><strong>Likelihood:</strong> {alt.severityLevel}</span>
+                        </>
+                      )}
+                      {alt.sentTime && (
+                        <>
+                          <span> • </span>
+                          <span><strong>Issued:</strong> {formatAlertDateTime(alt.sentTime)}</span>
+                        </>
+                      )}
+                      {(alt.effectiveStartTime || (alt.category === 'OFFICIAL' && alt.startTime)) && (
+                        <>
+                          <span> • </span>
+                          <span><strong>Effective:</strong> {formatAlertDateTime(alt.effectiveStartTime || alt.startTime)}</span>
+                        </>
+                      )}
+                      {(alt.effectiveEndTime || alt.endTime || alt.expiry) && (
+                        <>
+                          <span> • </span>
+                          <span style={{ color: 'var(--color-amber)' }}>
+                            <strong>Valid until:</strong> {formatAlertDateTime(alt.effectiveEndTime || alt.endTime || alt.expiry)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    <p className="alt-exp">{alt.explanation}</p>
+
+                    {alt.originalAlertLink && (
+                      <div className="alt-actions" style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <a 
+                          href={alt.originalAlertLink} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="mono" 
+                          style={{
+                            fontSize: '0.72rem',
+                            color: 'var(--color-cyan)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            textDecoration: 'none'
+                          }}
+                        >
+                          <ExternalLink size={12} />
+                          <span>View on NDMA SACHET Portal</span>
+                        </a>
+                        {alt.capXmlUrl && (
+                          <a 
+                            href={alt.capXmlUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="mono" 
+                            style={{
+                              fontSize: '0.72rem',
+                              color: 'var(--color-grey-light)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              textDecoration: 'none'
+                            }}
+                          >
+                            <ExternalLink size={12} />
+                            <span>Authentic CAP 1.2 XML</span>
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
             </div>
           </div>
         </div>
@@ -1042,7 +1431,8 @@ export default function AtlasView() {
 
         .alert-center-modal {
           width: 100%;
-          max-width: 650px;
+          max-width: 680px;
+          height: 85vh;
           max-height: 85vh;
           background: var(--bg-card);
           border: 1px solid var(--border-strong);
@@ -1050,14 +1440,20 @@ export default function AtlasView() {
           display: flex;
           flex-direction: column;
           overflow: hidden;
+          position: relative;
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7);
         }
 
         .modal-header {
+          flex-shrink: 0;
           display: flex;
           justify-content: space-between;
           align-items: center;
           padding: 16px 20px;
+          background: var(--bg-card);
           border-bottom: 1px solid var(--border-subtle);
+          position: relative;
+          z-index: 10;
         }
 
         .modal-title-row { display: flex; align-items: center; gap: 10px; }
@@ -1072,13 +1468,18 @@ export default function AtlasView() {
         }
 
         .alert-settings-box {
-          padding: 16px 20px;
-          background: rgba(9, 10, 10, 0.8);
+          flex-shrink: 0;
+          max-height: 180px;
+          overflow-y: auto;
+          padding: 14px 20px;
+          background: rgba(14, 16, 15, 0.98);
           border-bottom: 1px solid var(--border-subtle);
           display: flex;
           flex-direction: column;
           gap: 12px;
           font-size: 0.75rem;
+          position: relative;
+          z-index: 8;
         }
 
         .settings-field-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -1093,11 +1494,15 @@ export default function AtlasView() {
         }
 
         .alerts-scroll-list {
-          padding: 20px;
+          flex: 1 1 0%;
+          min-height: 0;
           overflow-y: auto;
+          padding: 16px 20px 24px;
           display: flex;
           flex-direction: column;
           gap: 12px;
+          position: relative;
+          z-index: 1;
         }
 
         .alert-item-card {
@@ -1111,14 +1516,286 @@ export default function AtlasView() {
         }
 
         .alert-item-card.watch-card { border-left: 4px solid var(--color-amber); }
+        .alert-item-card.official-card { border-left: 4px solid var(--color-red); background: rgba(255, 82, 82, 0.06); }
+        .alert-item-card.community-card { border-left: 4px solid var(--color-orange); }
 
         .alt-top { display: flex; justify-content: space-between; }
         .alt-title { font-size: 0.95rem; color: var(--color-ivory); }
         .alt-loc { font-size: 0.7rem; color: var(--color-grey); }
         .alt-exp { font-size: 0.75rem; color: var(--color-ivory-muted); line-height: 1.4; }
 
+        .official-status-card {
+          background: rgba(9, 10, 10, 0.6);
+          border: 1px solid var(--border-subtle);
+          padding: 12px;
+          border-radius: 4px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .official-card-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .official-feed-unavailable-box {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding: 10px;
+          background: rgba(229, 169, 60, 0.06);
+          border: 1px solid rgba(229, 169, 60, 0.25);
+          border-radius: 4px;
+        }
+
+        .feed-unavail-title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: var(--color-amber);
+        }
+
+        .feed-unavail-desc {
+          font-size: 0.68rem;
+          color: var(--color-grey);
+          line-height: 1.35;
+          margin: 0;
+        }
+
+        .view-official-feed-btn {
+          width: 100%;
+          padding: 8px 10px;
+          background: rgba(240, 237, 228, 0.05);
+          border: 1px solid var(--border-subtle);
+          border-radius: 3px;
+          font-size: 0.68rem;
+          color: var(--color-ivory);
+          cursor: pointer;
+          transition: all var(--transition-fast);
+        }
+
+        .view-official-feed-btn:hover {
+          border-color: var(--color-amber);
+          color: var(--color-amber);
+        }
+
+        .alert-tabs-bar {
+          flex-shrink: 0;
+          display: flex;
+          gap: 6px;
+          padding: 10px 20px;
+          background: rgba(9, 10, 10, 0.95);
+          border-bottom: 1px solid var(--border-subtle);
+          overflow-x: auto;
+          position: relative;
+          z-index: 5;
+        }
+
+        .alert-tab-btn {
+          padding: 6px 12px;
+          background: rgba(22, 24, 23, 0.8);
+          border: 1px solid var(--border-subtle);
+          border-radius: 3px;
+          font-size: 0.68rem;
+          color: var(--color-ivory-muted);
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all var(--transition-fast);
+        }
+
+        .alert-tab-btn.active, .alert-tab-btn:hover {
+          background: rgba(199, 243, 107, 0.1);
+          border-color: var(--color-lime);
+          color: var(--color-lime);
+        }
+
+        .official-feed-meta-bar {
+          flex-shrink: 0;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 20px;
+          background: rgba(14, 16, 15, 0.95);
+          border-bottom: 1px solid var(--border-subtle);
+          font-size: 0.7rem;
+          position: relative;
+          z-index: 4;
+          flex-wrap: wrap;
+        }
+
+        .meta-bar-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .meta-label {
+          color: var(--color-grey);
+          font-size: 0.65rem;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+        }
+
+        .meta-portal-link {
+          color: var(--color-cyan);
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-weight: 600;
+          font-size: 0.7rem;
+          transition: color var(--transition-fast);
+        }
+
+        .meta-portal-link:hover {
+          color: var(--color-ivory);
+          text-decoration: underline;
+        }
+
+        .meta-sep {
+          color: var(--border-subtle);
+        }
+
+        .meta-time {
+          color: var(--color-grey);
+          font-size: 0.68rem;
+        }
+
+        .meta-refresh-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          background: rgba(240, 237, 228, 0.05);
+          border: 1px solid var(--border-subtle);
+          border-radius: 3px;
+          font-size: 0.65rem;
+          color: var(--color-ivory);
+          cursor: pointer;
+          transition: all var(--transition-fast);
+        }
+
+        .meta-refresh-btn:hover:not(:disabled) {
+          border-color: var(--color-lime);
+          color: var(--color-lime);
+        }
+
+        .meta-refresh-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .official-loading-box, .official-feed-empty-state {
+          padding: 28px 20px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          text-align: center;
+          color: var(--color-grey);
+          font-size: 0.78rem;
+          margin: 0;
+        }
+
+        .official-feed-error-state {
+          margin: 0;
+          padding: 16px;
+          background: rgba(229, 169, 60, 0.06);
+          border: 1px solid rgba(229, 169, 60, 0.3);
+          border-left: 4px solid var(--color-amber);
+          border-radius: 4px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          font-size: 0.74rem;
+        }
+
+        .error-header-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--color-amber);
+        }
+
+        .error-header-row h4 {
+          margin: 0;
+          font-size: 0.88rem;
+          color: var(--color-ivory);
+        }
+
+        .error-body-text {
+          margin: 0;
+          color: var(--color-grey);
+          line-height: 1.4;
+        }
+
+        .integrity-guarantee-note {
+          padding: 8px 10px;
+          background: rgba(9, 10, 10, 0.7);
+          border: 1px solid var(--border-subtle);
+          border-radius: 2px;
+          font-size: 0.68rem;
+          color: var(--color-ivory);
+          line-height: 1.35;
+        }
+
+        .telemetry-info-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.68rem;
+          color: var(--color-grey);
+        }
+
+        .telemetry-info-row code {
+          color: var(--color-amber);
+          background: rgba(9, 10, 10, 0.8);
+          padding: 2px 6px;
+          border-radius: 2px;
+        }
+
+        .recheck-feed-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 12px;
+          align-self: flex-start;
+          background: rgba(229, 169, 60, 0.15);
+          border: 1px solid var(--color-amber);
+          border-radius: 3px;
+          font-size: 0.68rem;
+          color: var(--color-amber);
+          cursor: pointer;
+          font-weight: 600;
+          transition: all var(--transition-fast);
+        }
+
+        .recheck-feed-btn:hover {
+          background: var(--color-amber);
+          color: var(--bg-obsidian);
+        }
+
         @media (max-width: 1100px) {
           .atlas-main-grid { grid-template-columns: 1fr; height: auto; }
+        }
+
+        @media (max-width: 640px) {
+          .alert-center-modal {
+            max-height: 92vh;
+            height: 92vh;
+          }
+          .official-feed-meta-bar {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+          }
         }
       `}</style>
     </div>

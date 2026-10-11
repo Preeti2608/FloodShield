@@ -69,6 +69,35 @@ export function saveUserReport(reportInput) {
   }
 }
 
+export function updateStoredReportStatus(reportId, newStatus, actionText) {
+  try {
+    const existing = getStoredReports();
+    let found = false;
+    const updated = existing.map(r => {
+      if (r.id === reportId) {
+        found = true;
+        return {
+          ...r,
+          status: newStatus,
+          actionHistory: actionText
+            ? [actionText, ...(r.actionHistory || [])]
+            : (r.actionHistory || [])
+        };
+      }
+      return r;
+    });
+
+    if (found) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return { success: true, updated: true };
+    }
+    return { success: true, updated: false };
+  } catch (e) {
+    console.error('[FloodShield Storage] Failed to update report status in local storage:', e);
+    return { success: false, error: e.message };
+  }
+}
+
 export function clearStoredReports() {
   try {
     localStorage.removeItem(STORAGE_KEY);
@@ -77,3 +106,4 @@ export function clearStoredReports() {
     return false;
   }
 }
+

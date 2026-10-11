@@ -1,9 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Volume2, VolumeX, Eye, EyeOff, ArrowLeft, Map, AlertTriangle, Bot, SlidersHorizontal, Compass, PlusCircle } from 'lucide-react';
 import { toggleAtmosphericAudio } from '../utils/audioAmbiance';
+import { getHealth } from '../api/apiClient';
 
 export default function Header({ currentRoute, navigateTo, reducedMotion, toggleReducedMotion, reportsCount = 0, weatherOk = true }) {
   const [audioActive, setAudioActive] = useState(false);
+  const [backendStatus, setBackendStatus] = useState(null);
+
+  useEffect(() => {
+    getHealth().then(res => setBackendStatus(res));
+  }, []);
 
   const handleAudioToggle = () => {
     const newState = toggleAtmosphericAudio(!audioActive);
@@ -21,25 +27,34 @@ export default function Header({ currentRoute, navigateTo, reducedMotion, toggle
 
   // Section-specific accurate data mode badge (Requirement 7)
   const getSectionDataStatus = () => {
+    const isCloud = backendStatus?.connected;
     switch (currentRoute) {
       case '/atlas':
         return weatherOk
           ? { label: 'LIVE (Open-Meteo Weather)', dot: 'lime' }
           : { label: 'WEATHER DATA UNAVAILABLE', dot: 'grey' };
       case '/incidents':
-        return reportsCount > 0
-          ? { label: 'USER-REPORTED · LOCAL STORAGE', dot: 'orange' }
-          : { label: 'NO USER REPORTS LOGGED', dot: 'grey' };
+        return isCloud
+          ? { label: `LIVE (AWS DynamoDB · ${backendStatus.region})`, dot: 'lime' }
+          : (reportsCount > 0
+            ? { label: 'USER-REPORTED · LOCAL STORAGE', dot: 'orange' }
+            : { label: 'NO USER REPORTS LOGGED', dot: 'grey' });
       case '/copilot':
-        return { label: 'BACKEND COPILOT UNAVAILABLE', dot: 'grey' };
+        return isCloud
+          ? { label: 'AI COPILOT CONNECTED (AWS)', dot: 'lime' }
+          : { label: 'AI COPILOT (LOCAL TRIAGE ENGINE)', dot: 'lime' };
       case '/scenario-lab':
         return { label: 'SIMULATED SCENARIO', dot: 'amber' };
       case '/safe-passage':
-        return { label: 'ROUTING DATA UNAVAILABLE', dot: 'grey' };
+        return { label: 'HAZARD-AWARE ROUTE ESTIMATE', dot: 'amber' };
       case '/report':
-        return { label: 'LOCAL FORM PERSISTENCE', dot: 'orange' };
+        return isCloud
+          ? { label: 'AWS DYNAMODB & LOCAL STORAGE', dot: 'lime' }
+          : { label: 'LOCAL FORM PERSISTENCE', dot: 'orange' };
       default:
-        return { label: 'FLOODSHIELD PLATFORM', dot: 'lime' };
+        return isCloud
+          ? { label: `AWS CLOUD READY (${backendStatus.region})`, dot: 'lime' }
+          : { label: 'FLOODSHIELD PLATFORM', dot: 'lime' };
     }
   };
 

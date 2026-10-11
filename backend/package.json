@@ -1,0 +1,21 @@
+{
+  "name": "floodshield-backend",
+  "version": "1.0.0",
+  "description": "FloodShield Serverless Backend for AWS Lambda, API Gateway, and DynamoDB",
+  "type": "module",
+  "main": "lambda/handler.mjs",
+  "scripts": {
+    "test": "node --test test/handler.test.mjs",
+    "deploy": "node deploy.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.758.0",
+    "@aws-sdk/lib-dynamodb": "^3.758.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.758.0",
+    "@aws-sdk/client-sts": "^3.758.0",
+    "@aws-sdk/client-lambda": "^3.758.0",
+    "@aws-sdk/client-apigatewayv2": "^3.758.0",
+    "@aws-sdk/client-iam": "^3.758.0",
+    "archiver": "^7.0.1"
+  }
+}
